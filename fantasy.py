@@ -6,7 +6,7 @@ base_url = 'https://fantasysports.yahooapis.com/fantasy/v2'
 
 league_id = 'nba.l.178155'
 first_game_week = 2
-current_game_week = 8
+current_game_week = 16
 
 # get stat_id => stat_name
 id_to_stat = {
@@ -56,37 +56,6 @@ def hydrate_stats(oauth: OAuth2, teams: dict) -> None:
                     weekly_stats[id_to_stat[stat['stat']['stat_id']]] = stat['stat']['value']
             team['stats'].append(weekly_stats)
 
-def score_team_cats(team1: dict, team2: dict, start_week: int, end_week: int) -> (float, float):
-    """Returns the number of categories each team won in the given week range [start_week, end_week]. Ties count as 0.5
-
-    Args:
-        team1 (dict): Team to calculate category victories for
-        team2 (dict): Team to calculate category victories against
-        start_week (int): fantasy week number to start the calculation from
-        end_week (int): fantasy week number to end the calculation at (inclusive)
-
-    Returns:
-        float: Number of categories team1 won
-        float: Number of categories team2 won
-    """
-    # weekly_attrition_rate = 0.05
-    
-    points = 0
-    for week in range(start_week, end_week + 1): # +1 to make range inclusive
-        weekly_points = score_week(team1, team2, week)
-        points += weekly_points # * (1 - (end_week - week) * weekly_attrition_rate) # TODO fix value of second teams points per attrition
-    return (points, (end_week - start_week + 1) * 9 - points)
-
-def score_team_wins(team1: dict, team2: dict, start_week: int, end_week: int) -> float:
-    points = 0
-    for week in range(start_week, end_week + 1):
-        weekly_points = score_week(team1, team2, week)
-        if weekly_points > 4.5:
-            points += 3
-        elif weekly_points == 4.5:
-            points += 1
-    return points
-
 def score_week(team1: dict, team2: dict, week: int) -> float:
     week_index_adjust = week - first_game_week
     points = 0
@@ -103,8 +72,6 @@ def score_week(team1: dict, team2: dict, week: int) -> float:
 
 def print_rankings(team_points: list[dict]):
     teams_by_points = sorted(team_points, key=lambda k: k['points'], reverse=True)
-    for i, team in enumerate(teams_by_points):
-        print(f'{i+1}. {team["name"]:24s} {team["points"]:.2f}')
         
     for i, team in enumerate(teams_by_points):
         print(f'{i+1}. {team["name"]} ({team["points"]:.2f})')
@@ -114,10 +81,8 @@ if __name__ == '__main__':
     if not oauth.token_is_valid():
         oauth.refresh_access_token()
      
-    # get list of teams
-    # teams = get_teams(oauth)
-    
     # get stats for each team
+    # teams = get_teams(oauth)
     # hydrate_stats(oauth, teams)
     # with open(file='stats.json', mode='w', encoding='utf8') as fp:
     #     json.dump(teams, fp)
@@ -127,17 +92,44 @@ if __name__ == '__main__':
         team_stats = json.load(fp)
     
     # calculate number of cats won
+    team_expected_points_per_week = {}
+    for team in team_stats:
+        team_expected_points_per_week[team['name']] = []
+    
+    for week in range(first_game_week, current_game_week + 1):
+        for i, team1 in enumerate(team_stats):
+            points = 0
+            for j, team2 in enumerate(team_stats):
+                if i == j: continue
+                points += score_week(team1, team2, week)
+            team_expected_points_per_week[team1['name']].append(points / 7)
+    
+    # print(json.loads(oauth.session.get(f'{base_url}/team/428.l.178155.t.1/stats;type=week;week=2?format=json').text))
+    with open(file='test.json', mode='w', encoding='utf8') as fp:
+        json.dump(json.loads(oauth.session.get(f'{base_url}/team/428.l.178155.t.1/matchups?format=json').text), fp)
+    # read data for each team + write to file
+    
+    # SET WEEKS HERE
+    start = current_game_week - 5 - first_game_week
+    end = current_game_week - first_game_week
+    
     team_expected_points = []
-    for i, team1 in enumerate(team_stats):
-        points = 0
-        for j, team2 in enumerate(team_stats):
-            if i == j: continue
-            points += score_team_cats(team1, team2, current_game_week, current_game_week)[0]
+    for team, points in team_expected_points_per_week.items():
         team_expected_points.append({
-            'name': team1['name'],
-            'points': points / (current_game_week - (current_game_week) + 1) / 7 # TODO attrition
+            'name': team,
+            'points': sum(points[start:end+1]) / len(points[start:end+1])
         })
-    print_rankings(team_expected_points)
     
-    # calculate by points 3w, 1t, 0l
+    # print_rankings(team_expected_points)
     
+    
+    # TEAM / WEEK RANKINGS
+    team_week_points = []
+    for team, points in team_expected_points_per_week.items():
+        for week, week_points in enumerate(points):
+            team_week_points.append({
+                'name': f'{team} - Week {week + first_game_week}',
+                'points': week_points
+            })
+    print('\n\n')
+    # print_rankings(team_week_points)
